@@ -1,0 +1,91 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 2
+  tags:
+  - Ground
+  - KillPlane
+  - DollyZoom
+  - Enemy
+  - MovePlatform
+  - TopEnvironment
+  - LeftWall
+  - CheckPoints
+  - RightWall
+  layers:
+  - Default
+  - TransparentFX
+  - Ignore Raycast
+  - 
+  - Water
+  - UI
+  - 
+  - 
+  - Enemy
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  m_SortingLayers:
+  - name: Default
+    uniqueID: 0
+    locked: 0
+  - name: Background
+    uniqueID: 2603649445
+    locked: 0
+  - name: BehindParticles
+    uniqueID: 2782418837
+    locked: 0
+  - name: MiddleRockWall
+    uniqueID: 388095253
+    locked: 0
+  - name: MiddleGround
+    uniqueID: 99033725
+    locked: 0
+  - name: BehindStuff
+    uniqueID: 2812843475
+    locked: 0
+  - name: HurtGround
+    uniqueID: 2837630187
+    locked: 0
+  - name: Ground
+    uniqueID: 4252687303
+    locked: 0
+  - name: Particles
+    uniqueID: 3365765747
+    locked: 0
+  - name: Dangers
+    uniqueID: 2639305049
+    locked: 0
+  - name: FrontEnvironment
+    uniqueID: 453027795
+    locked: 0
+  - name: FrontParticles
+    uniqueID: 4232386855
+    locked: 0
+  - name: TopEnvironment
+    uniqueID: 4250257211
+    locked: 0
+  - name: FrontBlack
+    uniqueID: 34939365
+    locked: 0

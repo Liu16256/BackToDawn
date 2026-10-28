@@ -1,0 +1,355 @@
+﻿using UnityEngine;
+using System.Collections;
+
+public class PlayerControl : MonoBehaviour
+{
+    [Header("Movement")]
+    [SerializeField] float m_speed = 4.0f;
+    [SerializeField] float m_jumpForce = 7.5f;
+    [SerializeField] float m_rollForce = 6.0f;
+
+    [Header("Combat Stats")]
+    [SerializeField] int m_maxHP = 100;
+    [SerializeField] int m_attack = 20;
+    [SerializeField] float m_attackSpeed = 1.0f;
+    [SerializeField] int m_defense = 5;
+
+    [Header("Attack Settings")]
+    [SerializeField] private Transform attackCheckPoint;
+    [SerializeField] private float attackCheckRadius = 1f;
+    [SerializeField] private LayerMask enemyLayer;
+    private bool m_isAttacking = false;
+
+    [Header("Effects")]
+    [SerializeField] bool m_noBlood = false;
+    [SerializeField] GameObject m_slideDust;
+
+    private int m_currentHP;
+    private Animator m_animator;
+    private Rigidbody2D m_body2d;
+
+    private Sensor_HeroKnight m_groundSensor;
+    private Sensor_HeroKnight m_wallSensorR1;
+    private Sensor_HeroKnight m_wallSensorR2;
+    private Sensor_HeroKnight m_wallSensorL1;
+    private Sensor_HeroKnight m_wallSensorL2;
+
+    private bool m_isWallSliding = false;
+    private bool m_grounded = false;
+    private bool m_rolling = false;
+
+    private int m_facingDirection = 1;
+    private int m_currentAttack = 0;
+
+    private float m_timeSinceAttack = 0.0f;
+    private float m_delayToIdle = 0.0f;
+    private float m_rollDuration = 8.0f / 14.0f;
+    private float m_rollCurrentTime;
+
+    public Collider2D attackColider;
+
+    public delegate void HealthChangedDelegate(int currentHP, int maxHP);
+    public event HealthChangedDelegate OnHealthChanged;
+
+    [Header("UI References")]
+    [SerializeField] private UnityEngine.UI.Slider healthSlider;
+    [SerializeField] private TMPro.TextMeshProUGUI healthText;
+
+    void Start()
+    {
+        m_animator = GetComponent<Animator>();
+        m_body2d = GetComponent<Rigidbody2D>();
+
+        m_groundSensor = transform.Find("GroundSensor").GetComponent<Sensor_HeroKnight>();
+        m_wallSensorR1 = transform.Find("WallSensor_R1").GetComponent<Sensor_HeroKnight>();
+        m_wallSensorR2 = transform.Find("WallSensor_R2").GetComponent<Sensor_HeroKnight>();
+        m_wallSensorL1 = transform.Find("WallSensor_L1").GetComponent<Sensor_HeroKnight>();
+        m_wallSensorL2 = transform.Find("WallSensor_L2").GetComponent<Sensor_HeroKnight>();
+
+        m_currentHP = m_maxHP;
+        m_isAttacking = false;
+        UpdateHealthUI();
+
+        // 自动创建攻击检测点（防止未配置）
+        if (attackCheckPoint == null)
+        {
+            GameObject autoCheck = new GameObject("AttackCheckPoint");
+            autoCheck.transform.parent = transform;
+            autoCheck.transform.localPosition = new Vector3(0.5f, 0, 0);
+            attackCheckPoint = autoCheck.transform;
+            Debug.LogWarning("自动创建攻击检测点，建议手动调整位置！");
+        }
+    }
+
+    void Update()
+    {
+        m_timeSinceAttack += Time.deltaTime;
+        if (m_rolling)
+            m_rollCurrentTime += Time.deltaTime;
+        if (m_rollCurrentTime > m_rollDuration)
+            m_rolling = false;
+
+        // 地面检测
+        if (!m_grounded && m_groundSensor.State())
+        {
+            m_grounded = true;
+            m_animator.SetBool("Grounded", m_grounded);
+        }
+        if (m_grounded && !m_groundSensor.State())
+        {
+            m_grounded = false;
+            m_animator.SetBool("Grounded", m_grounded);
+        }
+
+        // 移动输入
+        float inputX = Input.GetAxis("Horizontal");
+        if (inputX > 0)
+        {
+            GetComponent<SpriteRenderer>().flipX = false;
+            m_facingDirection = 1;
+            attackCheckPoint.localPosition = new Vector3(Mathf.Abs(attackCheckPoint.localPosition.x), attackCheckPoint.localPosition.y, 0);
+        }
+        else if (inputX < 0)
+        {
+            GetComponent<SpriteRenderer>().flipX = true;
+            m_facingDirection = -1;
+            attackCheckPoint.localPosition = new Vector3(-Mathf.Abs(attackCheckPoint.localPosition.x), attackCheckPoint.localPosition.y, 0);
+        }
+
+        // 移动（非攻击/翻滚状态）
+        if (!m_rolling && !m_isAttacking)
+            m_body2d.velocity = new Vector2(inputX * m_speed, m_body2d.velocity.y);
+
+        // 动画参数
+        m_animator.SetFloat("AirSpeedY", m_body2d.velocity.y);
+        m_isWallSliding = (m_wallSensorR1.State() && m_wallSensorR2.State()) || (m_wallSensorL1.State() && m_wallSensorL2.State());
+        m_animator.SetBool("WallSlide", m_isWallSliding);
+
+        // ===== 核心：空格键触发攻击（无动画事件依赖）=====
+        if (Input.GetKeyDown(KeyCode.J) && m_timeSinceAttack > (1.0f / m_attackSpeed) && !m_rolling && !m_isAttacking)
+        {
+            m_isAttacking = true;
+            m_currentAttack = (m_currentAttack % 3) + 1;
+            m_animator.SetTrigger("Attack" + m_currentAttack);
+            m_timeSinceAttack = 0.0f;
+
+            // 立即检测并造成伤害
+            AttackCheck();
+
+            // 攻击结束解锁
+            Invoke(nameof(EndAttack), 0.5f);
+        }
+
+        // 其他操作（死亡/受击/格挡/翻滚/跳跃/移动）
+        else if (Input.GetKeyDown("e") && !m_rolling)
+        {
+            m_animator.SetBool("noBlood", m_noBlood);
+            m_animator.SetTrigger("Death");
+        }
+        else if (Input.GetKeyDown("q") && !m_rolling)
+        {
+            m_animator.SetTrigger("Hurt");
+        }
+        else if (Input.GetMouseButtonDown(1) && !m_rolling)
+        {
+            m_animator.SetTrigger("Block");
+            m_animator.SetBool("IdleBlock", true);
+        }
+        else if (Input.GetMouseButtonUp(1))
+        {
+            m_animator.SetBool("IdleBlock", false);
+        }
+        else if (Input.GetKeyDown("left shift") && !m_rolling && !m_isWallSliding)
+        {
+            m_rolling = true;
+            m_rollCurrentTime = 0.0f;
+            m_animator.SetTrigger("Roll");
+            m_body2d.velocity = new Vector2(m_facingDirection * m_rollForce, m_body2d.velocity.y);
+        }
+        else if (Input.GetKeyDown("space") && m_grounded && !m_rolling)
+        {
+            m_animator.SetTrigger("Jump");
+            m_grounded = false;
+            m_animator.SetBool("Grounded", m_grounded);
+            m_body2d.velocity = new Vector2(m_body2d.velocity.x, m_jumpForce);
+            m_groundSensor.Disable(0.2f);
+        }
+        else if (Mathf.Abs(inputX) > Mathf.Epsilon)
+        {
+            m_delayToIdle = 0.05f;
+            m_animator.SetInteger("AnimState", 1);
+        }
+        else
+        {
+            m_delayToIdle -= Time.deltaTime;
+            if (m_delayToIdle < 0)
+                m_animator.SetInteger("AnimState", 0);
+        }
+    }
+
+    private void AttackCheck()
+    {
+        GameObject[] allEnemies = GameObject.FindGameObjectsWithTag("Enemy");
+        if (allEnemies.Length == 0)
+        {
+            Debug.Log("无Enemy标签敌人");
+            return;
+        }
+
+        foreach (GameObject enemyObj in allEnemies)
+        {
+            // 仅对距离玩家1米内的敌人扣血
+            float distance = Vector2.Distance(transform.position, enemyObj.transform.position);
+            if (distance > 1f) continue;
+
+            Enemy enemyScript = enemyObj.GetComponent<Enemy>();
+            if (enemyScript == null) continue;
+
+            // 强制扣血（核心逻辑）
+            enemyScript.currentHealth -= m_attack;
+            enemyScript.currentHealth = Mathf.Max(0, enemyScript.currentHealth);
+            Debug.Log($"✅ {enemyObj.name} 剩余血量：{enemyScript.currentHealth}");
+
+            //if (enemyScript.currentHealth <= 0)
+            //    enemyScript.Die();
+        }
+    }
+
+    // 攻击结束解锁
+    private void EndAttack()
+    {
+        m_isAttacking = false;
+    }
+
+    private void RespawnAtCheckpoint()
+    {
+        if (CheckpointManager.Instance != null)
+            CheckpointManager.Instance.RespawnPlayer(this);
+    }
+
+    // 受伤逻辑
+    public void TakeDamage(int damage)
+    {
+        int previousHP = m_currentHP;
+        int realDamage = Mathf.Max(1, damage - m_defense);
+        m_currentHP -= realDamage;
+        if (m_currentHP < 0) m_currentHP = 0;
+
+        OnHealthChanged?.Invoke(m_currentHP, m_maxHP);
+        UpdateHealthUI();
+
+        m_animator.SetTrigger("Hurt");
+
+        if (m_currentHP <= 0)
+        {
+            m_currentHP = 0;
+            m_animator.SetBool("noBlood", m_noBlood);
+            m_animator.SetTrigger("Death");
+
+            Invoke(nameof(RespawnAtCheckpoint), 0.5f);
+        }
+        Debug.Log("Player took damage, caller = " + gameObject.name);
+
+    }
+
+    // 治疗逻辑
+    public void Heal(int healAmount)
+    {
+        if (m_currentHP <= 0) return;
+        int previousHP = m_currentHP;
+        m_currentHP += healAmount;
+        if (m_currentHP > m_maxHP) m_currentHP = m_maxHP;
+
+        OnHealthChanged?.Invoke(m_currentHP, m_maxHP);
+        UpdateHealthUI();
+    }
+
+    // 血量设置
+    public void SetMaxHealth(int newMaxHP, bool healToFull = false)
+    {
+        m_maxHP = newMaxHP;
+        if (healToFull)
+            m_currentHP = m_maxHP;
+        else if (m_currentHP > m_maxHP)
+            m_currentHP = m_maxHP;
+
+        OnHealthChanged?.Invoke(m_currentHP, m_maxHP);
+        UpdateHealthUI();
+    }
+
+    // 公共获取方法
+    public int GetCurrentHP() => m_currentHP;
+    public int GetMaxHP() => m_maxHP;
+    public float GetHealthPercentage() => m_maxHP <= 0 ? 0f : (float)m_currentHP / m_maxHP;
+    public bool IsAlive() => m_currentHP > 0;
+    public bool IsFullHealth() => m_currentHP >= m_maxHP;
+    public bool IsLowHealth(float threshold = 0.3f) => GetHealthPercentage() <= threshold;
+    public int GetDefense() => m_defense;
+    public int GetAttack() => m_attack;
+
+    // UI更新
+    private void UpdateHealthUI()
+    {
+        if (healthSlider != null)
+        {
+            healthSlider.maxValue = m_maxHP;
+            healthSlider.value = m_currentHP;
+        }
+        if (healthText != null)
+        {
+            healthText.text = $"{m_currentHP} / {m_maxHP}";
+        }
+    }
+
+    // 测试方法
+    [ContextMenu("测试攻击")]
+    public void TestAttack()
+    {
+        m_isAttacking = true;
+        m_currentAttack = (m_currentAttack % 3) + 1;
+        m_animator.SetTrigger("Attack" + m_currentAttack);
+        m_timeSinceAttack = 0.0f;
+        AttackCheck();
+        Invoke(nameof(EndAttack), 0.5f);
+    }
+
+    public void TestTakeDamage() => TakeDamage(10);
+    public void TestHeal() => Heal(10);
+    public void TestFullHeal()
+    {
+        m_currentHP = m_maxHP;
+        OnHealthChanged?.Invoke(m_currentHP, m_maxHP);
+        UpdateHealthUI();
+    }
+
+    // 动画事件
+    void AE_SlideDust()
+    {
+        Vector3 spawnPosition = m_facingDirection == 1 ? m_wallSensorR2.transform.position : m_wallSensorL2.transform.position;
+        if (m_slideDust != null)
+        {
+            GameObject dust = Instantiate(m_slideDust, spawnPosition, transform.localRotation);
+            dust.transform.localScale = new Vector3(m_facingDirection, 1, 1);
+        }
+    }
+
+    // Gizmos绘制攻击范围
+    private void OnDrawGizmosSelected()
+    {
+        if (attackCheckPoint != null)
+        {
+            Gizmos.color = Color.red;
+            Gizmos.DrawWireSphere(attackCheckPoint.position, attackCheckRadius);
+        }
+    }
+//    public void OnAttackBegin()
+//    {
+//        attackColider.enabled = true;
+//        Debug.Log("Begin");
+//    }
+//    public void OnAttackEnd()
+//    {
+//        attackColider.enabled = false;
+//        Debug.Log("End");
+//    }
+}
